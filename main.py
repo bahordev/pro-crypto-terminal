@@ -3,7 +3,6 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import pandas_ta as ta # Texnik tahlil uchun
 from datetime import datetime
 import time
 
