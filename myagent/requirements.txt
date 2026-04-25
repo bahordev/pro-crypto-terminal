@@ -1,4 +1,5 @@
 streamlit
-requests
 pandas
+pandas-ta
+requests
 plotly
