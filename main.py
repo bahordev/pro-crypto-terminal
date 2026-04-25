@@ -3,101 +3,121 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from datetime import datetime
 import time
 
-# --- SAHIFA KONFIGURATSIYASI ---
-st.set_page_config(page_title="BahorDev Pro Terminal", page_icon="📈", layout="wide")
+# --- 1. SAHIFA KONFIGURATSIYASI ---
+st.set_page_config(page_title="BahorDev Pro Terminal", layout="wide", initial_sidebar_state="expanded")
 
-# --- STYLE (Professional Dark Theme) ---
+# Professional Dark UI
 st.markdown("""
     <style>
-    .main { background-color: #0b0e11; }
-    .stMetric { background-color: #1e2329; border-radius: 10px; padding: 15px; border: 1px solid #363a45; }
+    .main { background-color: #0e1117; }
+    div[data-testid="stMetricValue"] { font-size: 24px; color: #00ffc8; }
+    .stAlert { border-radius: 10px; }
     </style>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
-# --- FUNKSIYALAR ---
-@st.cache_data(ttl=5)
-def fetch_data(symbol, interval, limit=150):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    data = requests.get(url).json()
-    df = pd.DataFrame(data, columns=['time', 'open', 'high', 'low', 'close', 'vol', 'close_t', 'q_vol', 'trades', 't_base', 't_quote', 'ignore'])
-    df['time'] = pd.to_datetime(df['time'], unit='ms')
-    for col in ['open', 'high', 'low', 'close', 'vol']:
-        df[col] = df[col].astype(float)
+# --- 2. TEXNIK ANALIZ FUNKSIYALARI ---
+def add_indicators(df):
+    # EMA (Exponential Moving Average)
+    df['EMA9'] = df['close'].ewm(span=9, adjust=False).mean()
+    df['EMA21'] = df['close'].ewm(span=21, adjust=False).mean()
+    
+    # RSI (Relative Strength Index)
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
+    df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # MACD
+    exp1 = df['close'].ewm(span=12, adjust=False).mean()
+    exp2 = df['close'].ewm(span=26, adjust=False).mean()
+    df['MACD'] = exp1 - exp2
+    df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
     return df
 
+# --- 3. BINANCE MA'LUMOTLARINI OLISH ---
+@st.cache_data(ttl=2)
+def fetch_data(symbol, interval):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit=150"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        if isinstance(data, list):
+            df = pd.DataFrame(data, columns=['time','open','high','low','close','vol','c_t','q_v','trd','tb_v','tq_v','ign'])
+            df['time'] = pd.to_datetime(df['time'], unit='ms')
+            for col in ['open', 'high', 'low', 'close', 'vol']:
+                df[col] = df[col].astype(float)
+            return add_indicators(df)
+        return pd.DataFrame()
+    except:
+        return pd.DataFrame()
+
+@st.cache_data(ttl=1)
 def get_order_book(symbol):
     url = f"https://api.binance.com/api/v3/depth?symbol={symbol}&limit=10"
-    data = requests.get(url).json()
-    bids = pd.DataFrame(data['bids'], columns=['Price', 'Quantity']).astype(float)
-    asks = pd.DataFrame(data['asks'], columns=['Price', 'Quantity']).astype(float)
-    return bids, asks
+    try:
+        response = requests.get(url)
+        data = response.json()
+        # 'bids' va 'asks' mavjudligini tekshirish (Xatolikni oldini olish)
+        if 'bids' in data and 'asks' in data:
+            bids = pd.DataFrame(data['bids'], columns=['Price', 'Quantity']).astype(float)
+            asks = pd.DataFrame(data['asks'], columns=['Price', 'Quantity']).astype(float)
+            return bids, asks
+        return pd.DataFrame(), pd.DataFrame()
+    except:
+        return pd.DataFrame(), pd.DataFrame()
 
-# --- SIDEBAR ---
-st.sidebar.title("💎 PRO TERMINAL")
-symbol = st.sidebar.selectbox("Valyuta Juftligi:", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ARBUSDT"], index=0)
-timeframe = st.sidebar.selectbox("Taymfreym:", ["1m", "5m", "15m", "1h", "4h", "1d"], index=2)
-indicator = st.sidebar.multiselect("Indikatorlar:", ["RSI", "EMA 20", "EMA 50", "Bollinger Bands"], default=["RSI", "EMA 20"])
+# --- 4. SIDEBAR ---
+st.sidebar.title("💎 ELITE ANALYTICS")
+symbol = st.sidebar.selectbox("Valyuta:", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"], index=0)
+timeframe = st.sidebar.radio("Timeframe:", ["1m", "5m", "15m", "1h", "1d"], horizontal=True)
 
-# --- ASOSIY QISM ---
+# --- 5. ASOSIY PANEL ---
 df = fetch_data(symbol, timeframe)
 bids, asks = get_order_book(symbol)
 
-# Metrikalar
-last_price = df['close'].iloc[-1]
-change = ((df['close'].iloc[-1] - df['close'].iloc[0]) / df['close'].iloc[0]) * 100
+if not df.empty:
+    col1, col2 = st.columns([3, 1])
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric(f"{symbol} Narxi", f"${last_price:,}", f"{change:.2f}%")
-c2.metric("24s Hajm", f"{df['vol'].sum():,.0f}")
-c3.metric("Eng Yuqori", f"${df['high'].max():,}")
-c4.metric("Eng Past", f"${df['low'].min():,}")
+    with col1:
+        # Grafik yaratish
+        fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
+                            vertical_spacing=0.05, row_heights=[0.6, 0.2, 0.2])
 
-# --- GRAFIK QURISH ---
-fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
+        # Candlestick + EMA
+        fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], 
+                                     low=df['low'], close=df['close'], name="Market"), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['time'], y=df['EMA9'], name="EMA 9", line=dict(color='#00ffc8')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['time'], y=df['EMA21'], name="EMA 21", line=dict(color='#ff007a')), row=1, col=1)
 
-# Shamlar grafigi
-fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Narx"), row=1, col=1)
+        # RSI
+        fig.add_trace(go.Scatter(x=df['time'], y=df['RSI'], name="RSI", line=dict(color='#ffd700')), row=2, col=1)
+        fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1)
+        fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1)
 
-# Indikatorlar qo'shish
-if "EMA 20" in indicator:
-    df['EMA20'] = ta.ema(df['close'], length=20)
-    fig.add_trace(go.Scatter(x=df['time'], y=df['EMA20'], line=dict(color='yellow', width=1), name="EMA 20"), row=1, col=1)
+        # MACD
+        fig.add_trace(go.Bar(x=df['time'], y=df['MACD']-df['Signal'], name="MACD"), row=3, col=1)
 
-if "RSI" in indicator:
-    df['RSI'] = ta.rsi(df['close'], length=14)
-    fig.add_trace(go.Scatter(x=df['time'], y=df['RSI'], line=dict(color='magenta', width=1.5), name="RSI"), row=2, col=1)
-    fig.add_hline(y=70, line_dash="dot", row=2, col=1, line_color="red")
-    fig.add_hline(y=30, line_dash="dot", row=2, col=1, line_color="green")
+        fig.update_layout(height=800, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False)
+        st.plotly_chart(fig, use_container_width=True)
 
-fig.update_layout(template="plotly_dark", height=700, xaxis_rangeslider_visible=False, margin=dict(l=10, r=10, t=10, b=10))
-st.plotly_chart(fig, use_container_width=True)
+    with col2:
+        # Narx metrikasi
+        curr_p = df['close'].iloc[-1]
+        prev_p = df['close'].iloc[-2]
+        change = ((curr_p - prev_p) / prev_p) * 100
+        st.metric(f"{symbol}", f"${curr_p:,.2f}", f"{change:.2f}%")
+        
+        st.markdown("### 🏦 Order Book")
+        if not asks.empty:
+            st.write("🔴 Asks (Sotuv)")
+            st.dataframe(asks.sort_values(by="Price", ascending=False), hide_index=True, use_container_width=True)
+            st.write("🟢 Bids (Sotib olish)")
+            st.dataframe(bids, hide_index=True, use_container_width=True)
+        else:
+            st.warning("Order book yuklanmadi (API Limit).")
 
-# --- ORDER BOOK VA TAHLIL ---
-col_left, col_right = st.columns(2)
-
-with col_left:
-    st.subheader("📊 Canli Order Book (Bozor Chuqurligi)")
-    o_col1, o_col2 = st.columns(2)
-    o_col1.write("🟢 Bids (Sotib olish)")
-    o_col1.dataframe(bids, use_container_width=True)
-    o_col2.write("🔴 Asks (Sotish)")
-    o_col2.dataframe(asks, use_container_width=True)
-
-with col_right:
-    st.subheader("💡 AI Signal & Tahlil")
-    rsi_val = ta.rsi(df['close'], length=14).iloc[-1]
-    if rsi_val < 30:
-        st.success(f"STRONG BUY: RSI ({rsi_val:.2f}) haddan tashqari sotilgan hududda.")
-    elif rsi_val > 70:
-        st.error(f"STRONG SELL: RSI ({rsi_val:.2f}) haddan tashqari sotib olingan hududda.")
-    else:
-        st.warning(f"NEUTRAL: Bozor hozircha yo'nalish tanlamadi. RSI: {rsi_val:.2f}")
-    
-    st.info("Eslatma: Ushbu tahlil avtomatik algoritmlar tomonidan generatsiya qilingan.")
-
-# --- AVTOMATIK YANGILANISH ---
-time.sleep(2)
-st.rerun()
+    # Avtomat yangilash (Binance block qilmasligi uchun 5 soniya)
+    time.sleep(5)
