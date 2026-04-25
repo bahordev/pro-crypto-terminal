@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import pandas_ta as ta # Texnik tahlil uchun
+# pandas_ta o'rniga oddiy hisob-kitob ishlatamiz
 from datetime import datetime
 import time
 
@@ -17,6 +17,14 @@ st.markdown("""
     .stMetric { background-color: #1e2329; border-radius: 10px; padding: 15px; border: 1px solid #363a45; }
     </style>
 """, unsafe_allow_html=True)
+
+# --- RSI HISOB-KITOBI (pandas_ta o'rniga) ---
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
 # --- FUNKSIYALAR ---
 @st.cache_data(ttl=5)
@@ -40,7 +48,7 @@ def get_order_book(symbol):
 st.sidebar.title("💎 PRO TERMINAL")
 symbol = st.sidebar.selectbox("Valyuta Juftligi:", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "ARBUSDT"], index=0)
 timeframe = st.sidebar.selectbox("Taymfreym:", ["1m", "5m", "15m", "1h", "4h", "1d"], index=2)
-indicator = st.sidebar.multiselect("Indikatorlar:", ["RSI", "EMA 20", "EMA 50", "Bollinger Bands"], default=["RSI", "EMA 20"])
+indicator = st.sidebar.multiselect("Indikatorlar:", ["RSI", "EMA 20"], default=["RSI", "EMA 20"])
 
 # --- ASOSIY QISM ---
 df = fetch_data(symbol, timeframe)
@@ -59,16 +67,14 @@ c4.metric("Eng Past", f"${df['low'].min():,}")
 # --- GRAFIK QURISH ---
 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
 
-# Shamlar grafigi
 fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close'], name="Narx"), row=1, col=1)
 
-# Indikatorlar qo'shish
 if "EMA 20" in indicator:
-    df['EMA20'] = ta.ema(df['close'], length=20)
+    df['EMA20'] = df['close'].ewm(span=20, adjust=False).mean()
     fig.add_trace(go.Scatter(x=df['time'], y=df['EMA20'], line=dict(color='yellow', width=1), name="EMA 20"), row=1, col=1)
 
 if "RSI" in indicator:
-    df['RSI'] = ta.rsi(df['close'], length=14)
+    df['RSI'] = calculate_rsi(df['close'], 14)
     fig.add_trace(go.Scatter(x=df['time'], y=df['RSI'], line=dict(color='magenta', width=1.5), name="RSI"), row=2, col=1)
     fig.add_hline(y=70, line_dash="dot", row=2, col=1, line_color="red")
     fig.add_hline(y=30, line_dash="dot", row=2, col=1, line_color="green")
@@ -80,25 +86,22 @@ st.plotly_chart(fig, use_container_width=True)
 col_left, col_right = st.columns(2)
 
 with col_left:
-    st.subheader("📊 Canli Order Book (Bozor Chuqurligi)")
+    st.subheader("📊 Canli Order Book")
     o_col1, o_col2 = st.columns(2)
-    o_col1.write("🟢 Bids (Sotib olish)")
+    o_col1.write("🟢 Bids")
     o_col1.dataframe(bids, use_container_width=True)
-    o_col2.write("🔴 Asks (Sotish)")
+    o_col2.write("🔴 Asks")
     o_col2.dataframe(asks, use_container_width=True)
 
 with col_right:
     st.subheader("💡 AI Signal & Tahlil")
-    rsi_val = ta.rsi(df['close'], length=14).iloc[-1]
+    rsi_val = calculate_rsi(df['close'], 14).iloc[-1]
     if rsi_val < 30:
-        st.success(f"STRONG BUY: RSI ({rsi_val:.2f}) haddan tashqari sotilgan hududda.")
+        st.success(f"STRONG BUY: RSI ({rsi_val:.2f})")
     elif rsi_val > 70:
-        st.error(f"STRONG SELL: RSI ({rsi_val:.2f}) haddan tashqari sotib olingan hududda.")
+        st.error(f"STRONG SELL: RSI ({rsi_val:.2f})")
     else:
-        st.warning(f"NEUTRAL: Bozor hozircha yo'nalish tanlamadi. RSI: {rsi_val:.2f}")
-    
-    st.info("Eslatma: Ushbu tahlil avtomatik algoritmlar tomonidan generatsiya qilingan.")
+        st.warning(f"NEUTRAL: RSI: {rsi_val:.2f}")
 
-# --- AVTOMATIK YANGILANISH ---
 time.sleep(2)
 st.rerun()
